@@ -5,3 +5,7 @@
 # 2) Controling and supervising sub-programms during runtime
 #
 ######################################################################################
+
+import platform
+
+print(f"Hello World! I am {platform.system()} using {platform.version()}")
