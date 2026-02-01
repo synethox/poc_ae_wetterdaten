@@ -1,0 +1,33 @@
+"""Schnelltest ob alle Packages installiert sind"""
+
+try:
+    import fastapi
+    print("✓ fastapi installiert")
+except ImportError:
+    print("✗ fastapi fehlt")
+
+try:
+    import sqlalchemy
+    print("✓ sqlalchemy installiert")
+except ImportError:
+    print("✗ sqlalchemy fehlt")
+
+try:
+    import pandas
+    print("✓ pandas installiert")
+except ImportError:
+    print("✗ pandas fehlt")
+
+try:
+    import requests
+    print("✓ requests installiert")
+except ImportError:
+    print("✗ requests fehlt")
+
+try:
+    from pydantic import BaseModel
+    print("✓ pydantic installiert")
+except ImportError:
+    print("✗ pydantic fehlt")
+
+print("\nTest Beendet")
