@@ -1,11 +1,21 @@
 ######################################################################################
 #
-# This code should handle the management and core of our application This consists of:
-# 1) Orchestrating Startup routine 
-# 2) Controling and supervising sub-programms during runtime
+# zis is a playground. it grounds plays
 #
 ######################################################################################
 
-import platform
+from typing import Union
 
-print(f"Hello World! I am {platform.system()} using {platform.version()}")
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
+@app.get("/")
+def read_root():
+    return {"Hello": "World"}
+
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int, q: Union[str, None] = None):
+    return {"item_id": item_id, "q": q}
