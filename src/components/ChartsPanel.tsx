@@ -2,7 +2,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid
 } from "recharts";
 import type { TemperaturePoint } from "../api/types";
-import { exportCsv } from "../utils/exportCsv";
+
 
 type Props = {
   stationName?: string;
@@ -10,14 +10,8 @@ type Props = {
   loading?: boolean;
 };
 
-function formatDateLabel(iso: string) {
-  // ISO: YYYY-MM-DD -> DD.MM
-  const [y, m, d] = iso.split("-");
-  return `${d}.${m}`;
-}
-
 export function ChartsPanel({ stationName, data, loading }: Props) {
-  const canExport = data.length > 0;
+  
 
   return (
     <section className="panel">
@@ -27,15 +21,6 @@ export function ChartsPanel({ stationName, data, loading }: Props) {
           {loading ? " — lädt…" : ""}
         </h2>
 
-        <button
-          onClick={() => exportCsv("temperatures.csv", data)}
-          disabled={!canExport}
-          title={!canExport ? "Keine Daten zum Export" : "CSV exportieren"}
-          className="exportBtn"
-          type="button"
-        >
-          Export CSV
-        </button>
       </div>
 
       {!data.length ? (
@@ -47,9 +32,12 @@ export function ChartsPanel({ stationName, data, loading }: Props) {
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis
                 dataKey="date"
-                tickFormatter={formatDateLabel}
-                minTickGap={20}
-                interval="preserveStartEnd"
+                tickFormatter={(v: string) => {
+                  const s = String(v);
+                  const ym = s.length >= 7 ? s.slice(0, 7) : s; 
+                  const [y, m] = ym.split("-");
+                  if (!y || !m) return s;
+                   return `${m}.${y}`;;}}
               />
               <YAxis />
               <Tooltip

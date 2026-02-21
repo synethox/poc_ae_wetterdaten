@@ -1,26 +1,20 @@
 import type { Station } from "../api/types";
 import { RotateCcw, Search, Loader2 } from "lucide-react";
 
-
-
-
 type Props = {
-  // Filter
+  
   lat: number;
   lon: number;
   radiusKm: number;
   limit: number;
   from: string;
   to: string;
-
-  // Stations
+  canSearch?: boolean;  
   stations: Station[];
-  selectedStationId: string | null;
+  selectedStationId: string | null; 
+  view: "chart" | "table" ;
 
-  // View
-  view: "chart" | "table" | "map";
-
-  // Handlers
+  
   onChange: (patch: Partial<{
     lat: number;
     lon: number;
@@ -35,7 +29,7 @@ type Props = {
 
   onReset: () => void;
 
-  onSetView: (v: "chart" | "table" | "map") => void;
+  onSetView: (v: "chart" | "table" ) => void;
 
   loadingStations?: boolean;
   loadingTemps?: boolean;
@@ -46,20 +40,17 @@ type Props = {
 
 export function Toolbar(props: Props) {
   const {
-    lat, lon, radiusKm, limit, from, to,
-    stations, selectedStationId,
-    view,
-    onChange, onSearchStations, onSelectStation,
-    onReset,
-    onSetView,
-    loadingStations, loadingTemps,
-    onLoadTemperatures,
-    canLoad,
-    
-    
-
-
-  } = props;
+  lat, lon, radiusKm, limit, from, to,
+  canSearch,
+  stations, selectedStationId,
+  view,
+  onChange, onSearchStations, onSelectStation,
+  onReset,
+  onSetView,
+  loadingStations, loadingTemps,
+  onLoadTemperatures,
+  canLoad,
+} = props;
 
   const statusText = loadingStations ? "Suche Stationen…" : loadingTemps ? "Lade Daten…" : "Bereit";
   const disableControls = !!loadingStations || !!loadingTemps;
@@ -73,8 +64,9 @@ export function Toolbar(props: Props) {
 
           <div className="toolbar__actions">
             <button className="iconBtn" onClick={onReset} title="Reset" aria-label="Reset" type="button">  <RotateCcw size={18} /> </button>
-            <button className="iconBtn" onClick={onSearchStations} disabled={disableControls} title="Stationen suchen" aria-label="Stationen suchen" type="button" >
-            {loadingStations ? <Loader2 size={18} className="spin" /> : <Search size={18} />} 
+            <button className="iconBtn" onClick={onSearchStations} disabled={disableControls || canSearch === false} title={canSearch === false ? "Bitte Eingaben prüfen (Koordinaten/Radius/Zeitraum)" : "Stationen suchen"} >
+            {loadingStations ? <Loader2 size={18} className="spin" /> : <Search size={18} />}
+      
             </button>
           </div>
         </div>
@@ -92,12 +84,7 @@ export function Toolbar(props: Props) {
           >
             Tabelle
           </button>
-          <button
-            className={`viewBtn ${view === "map" ? "isActive" : ""}`}
-            onClick={() => onSetView("map")}
-          >
-            Map
-          </button>
+          
         </div>
       </div>
 
@@ -200,6 +187,7 @@ export function Toolbar(props: Props) {
           type="button"
           >
           Daten laden
+          
           </button>
       </div>
 
