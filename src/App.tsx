@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Toolbar } from "./components/Toolbar";
 import { ChartsPanel } from "./components/ChartsPanel";
 import { TemperatureTable } from "./components/TemperatureTable";
@@ -15,8 +15,16 @@ function daysAgoISO(n: number) {
   return d.toISOString().slice(0, 10);
 }
 
+function normalizeSearchParams(radiusKm: number, limit: number, from: string, to: string) {
+  const clampedRadiusKm = Math.max(1, Math.min(100, radiusKm));
+  const clampedLimit = Math.max(1, Math.min(10, limit));
+  if (from > to) {
+    throw new Error("Startdatum darf nicht nach Enddatum liegen.");
+  }
+  return { clampedRadiusKm, clampedLimit };
+}
+
 export default function App() {
-  // Filter state
   const [lat, setLat] = useState<number>(48.1372);
   const [lon, setLon] = useState<number>(11.5756);
   const [radiusKm, setRadiusKm] = useState<number>(50);
@@ -24,13 +32,12 @@ export default function App() {
   const [from, setFrom] = useState<string>(daysAgoISO(30));
   const [to, setTo] = useState<string>(todayISO());
 
-  // View state (Chart / Tabelle / Map)
-  const [view, setView] = useState<"chart" | "table" | "map">("chart");
+  const [view, setView] = useState<"chart" | "table" >("chart");
 
-  // Data state
   const [stations, setStations] = useState<Station[]>([]);
   const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
   const [activeStationId, setActiveStationId] = useState<string | null>(null);
+
   const activeStation = useMemo(
     () => stations.find((s) => s.id === activeStationId),
     [stations, activeStationId]
@@ -40,6 +47,34 @@ export default function App() {
   const [loadingStations, setLoadingStations] = useState(false);
   const [loadingTemps, setLoadingTemps] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // UX: Buttons nur aktiv, wenn sinnvoll
+  const canSearch =
+    Number.isFinite(lat) &&
+    Number.isFinite(lon) &&
+    radiusKm > 0 &&
+    limit > 0 &&
+    from <= to &&
+    !loadingStations;
+
+  const canLoadTemps =
+    !!selectedStationId &&
+    from <= to &&
+    !loadingStations &&
+    !loadingTemps;
+
+  // UX: Fehler verschwindet, sobald User etwas ändert
+  useEffect(() => {
+    setError(null);
+  }, [lat, lon, radiusKm, limit, from, to, selectedStationId, view]);
+
+  // UX: Wenn Zeitraum geändert wird, alte Ergebnisse zurücksetzen (simpel & sicher)
+  useEffect(() => {
+    setStations([]);
+    setSelectedStationId(null);
+    setActiveStationId(null);
+    setTemps([]);
+  }, [from, to]);
 
   const resetAll = () => {
     setError(null);
@@ -51,24 +86,30 @@ export default function App() {
   };
 
   const onSearchStations = async () => {
-    setError(null);
-    setLoadingStations(true);
-    setStations([]);
-    setSelectedStationId(null);
-    setActiveStationId(null);
-    setTemps([]);
-
     try {
-      // Validierung: Limit auf 10, Radius auf 100km begrenzen
-      const clampedRadiusKm = Math.min(100, Math.max(1, radiusKm));
-      const clampedLimit = Math.min(10, Math.max(1, limit));
-      
-      // Werte aktualisieren falls sie außerhalb der Limits waren
-      if (clampedRadiusKm !== radiusKm) setRadiusKm(clampedRadiusKm);
-      if (clampedLimit !== limit) setLimit(clampedLimit);
-      
-      const res = await searchStations({ lat, lon, radiusKm: clampedRadiusKm, limit: clampedLimit });
+      setError(null);
+      setLoadingStations(true);
+
+      const { clampedRadiusKm, clampedLimit } = normalizeSearchParams(radiusKm, limit, from, to);
+
+      const res = await searchStations({
+        lat,
+        lon,
+        radiusKm: clampedRadiusKm,
+        limit: clampedLimit,
+        from,
+        to,
+      });
+
       setStations(res);
+
+      setSelectedStationId(null);
+      setActiveStationId(null);
+      setTemps([]);
+
+      if (res.length === 0) {
+        setError("Keine Stationen mit Daten im gewählten Zeitraum gefunden. Zeitraum oder Radius anpassen.");
+      }
     } catch (e: any) {
       setError(e?.message ?? "Fehler bei der Stationssuche");
     } finally {
@@ -79,32 +120,31 @@ export default function App() {
   const onSelectStation = (stationId: string) => {
     setSelectedStationId(stationId);
   };
+
   const onLoadTemperatures = async () => {
     if (!selectedStationId) return;
 
-    if (from > to) {
-      setError("Startdatum darf nicht nach Enddatum liegen.");
-      return;
-    }
-
-    setError(null);
-    setLoadingTemps(true);
-    setTemps([]);
-
     try {
+      setError(null);
+      setLoadingTemps(true);
+      setTemps([]);
+
       const res = await fetchTemperatures({ stationId: selectedStationId, from, to });
       setTemps(res);
+
+      if (res.length === 0) {
+        setError("Für diese Station sind im gewählten Zeitraum keine Daten verfügbar.");
+        setActiveStationId(null);
+        return;
+      }
+
       setActiveStationId(selectedStationId);
     } catch (e: any) {
       setError(e?.message ?? "Fehler beim Laden der Temperaturdaten");
     } finally {
       setLoadingTemps(false);
     }
-};
-
-
-  
-  const canLoad = !!selectedStationId && !loadingStations && !loadingTemps && from <= to;
+  };
 
   return (
     <div className="appShell">
@@ -121,18 +161,19 @@ export default function App() {
         loadingStations={loadingStations}
         loadingTemps={loadingTemps}
         onLoadTemperatures={onLoadTemperatures}
-        canLoad={canLoad}
+        canLoad={canLoadTemps}
+        canSearch={canSearch}
         onChange={(patch) => {
           if (patch.lat !== undefined) setLat(patch.lat);
           if (patch.lon !== undefined) setLon(patch.lon);
+
           if (patch.radiusKm !== undefined) {
-            // Radius auf 100km begrenzen
             setRadiusKm(Math.min(100, Math.max(1, patch.radiusKm)));
           }
           if (patch.limit !== undefined) {
-            // Limit auf 10 begrenzen
             setLimit(Math.min(10, Math.max(1, patch.limit)));
           }
+
           if (patch.from !== undefined) setFrom(patch.from);
           if (patch.to !== undefined) setTo(patch.to);
         }}
@@ -140,34 +181,20 @@ export default function App() {
         onSelectStation={onSelectStation}
         onReset={resetAll}
         onSetView={setView}
-        
-        
-        />
+      />
 
-      {error && (
-        <div className="errorBanner">
-          {error}
-        </div>
-      )}
+      {error && <div className="errorBanner">{error}</div>}
 
       <main className="content">
         {view === "chart" && (
           <ChartsPanel stationName={activeStation?.name} data={temps} loading={loadingTemps} />
         )}
 
-        {view === "table" && (
-          <TemperatureTable data={temps} />
-        )}
+        {view === "table" && <TemperatureTable data={temps} />}
 
-        {view === "map" && (
-          <div className="panel">
-            <h2 className="panel__title">Map View</h2>
-            <p>
-              Placeholder: Hier können wir später Leaflet einbauen (Kreis um Standort + Stationen als Marker).
-            </p>
-          </div>
-        )}
+        
       </main>
     </div>
   );
 }
+

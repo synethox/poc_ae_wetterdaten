@@ -1,4 +1,3 @@
-import React from "react";
 import type { Station } from "../api/types";
 
 type Props = {
