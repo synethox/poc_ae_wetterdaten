@@ -26,7 +26,7 @@ export default function App() {
   const [radiusKm, setRadiusKm] = useState<number>(50);
   const [limit, setLimit] = useState<number>(10);
 
-  const [from, setFrom] = useState<string>("2025-01-01");
+  const [from, setFrom] = useState<string>("2025-12-01");
   const [to, setTo] = useState<string>("2025-12-31");
 
   const [view, setView] = useState<"chart" | "table">("chart");
