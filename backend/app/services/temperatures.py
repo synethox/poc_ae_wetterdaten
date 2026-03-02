@@ -1,7 +1,6 @@
-"""Temperature retrieval – cache daily data in PostgreSQL, aggregate to monthly."""
-
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date as dt_date
 
@@ -9,6 +8,7 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import async_session
 from app.services.ghcn import download_daily_csv
 
 logger = logging.getLogger(__name__)
@@ -17,8 +17,6 @@ _INSERT_BATCH = 5000
 
 
 async def _ensure_daily_data(session: AsyncSession, station_id: str) -> bool:
-    """Download and store GHCN daily data for *station_id* if not cached yet."""
-
     row = await session.execute(
         text("SELECT 1 FROM daily_temperatures WHERE station_id = :sid LIMIT 1"),
         {"sid": station_id},
@@ -33,14 +31,12 @@ async def _ensure_daily_data(session: AsyncSession, station_id: str) -> bool:
 
     df = df.copy()
 
-    # Ensure all expected columns exist
     for col in ("tmin", "tmax", "tavg"):
         if col not in df.columns:
             df[col] = float("nan")
         else:
             df[col] = df[col].round(1)
 
-    # Drop rows without any temperature info
     df.dropna(subset=["tmin", "tmax"], how="all", inplace=True)
     if df.empty:
         return False
@@ -78,8 +74,6 @@ async def get_temperatures(
     from_date: str,
     to_date: str,
 ) -> list[dict]:
-    """Return monthly-aggregated temperature data for a station and date range."""
-
     has_data = await _ensure_daily_data(session, station_id)
     if not has_data:
         return []
@@ -120,3 +114,20 @@ async def get_temperatures(
         }
         for row in result
     ]
+
+
+_inflight: set[str] = set()
+_inflight_lock = asyncio.Lock()
+
+
+async def ensure_station_cached(station_id: str) -> None:
+    async with _inflight_lock:
+        if station_id in _inflight:
+            return
+        _inflight.add(station_id)
+    try:
+        async with async_session() as session:
+            await _ensure_daily_data(session, station_id)
+    finally:
+        async with _inflight_lock:
+            _inflight.discard(station_id)

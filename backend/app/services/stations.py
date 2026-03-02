@@ -1,5 +1,3 @@
-"""Station search – PostGIS spatial query."""
-
 from __future__ import annotations
 
 from datetime import date as dt_date
@@ -17,11 +15,8 @@ async def search_stations_db(
     from_date: str | None = None,
     to_date: str | None = None,
 ) -> list[dict]:
-    """Return the closest stations within *radius_km* of (*lat*, *lon*)."""
-
     radius_m = radius_km * 1000
 
-    # Build WHERE clauses dynamically to avoid asyncpg parameter-type ambiguity
     where_parts = [
         "ST_DWithin(geom, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography, :radius_m)"
     ]
