@@ -11,13 +11,13 @@ export function TemperatureTable({ data }: Props) {
 
   return (
     <div className="panel">
-      <h2 className="panel__title">Temperaturdaten (Tabelle)</h2>
+      <h2 className="panel__title">Temperaturdaten (pro Jahr)</h2>
 
       <div style={{ overflowX: "auto" }}>
         <table className="table">
           <thead>
             <tr>
-              <th>Datum</th>
+              <th>Jahr</th>
               <th style={{ textAlign: "right" }}>Tmin</th>
               <th style={{ textAlign: "right" }}>Tavg</th>
               <th style={{ textAlign: "right" }}>Tmax</th>
@@ -26,7 +26,7 @@ export function TemperatureTable({ data }: Props) {
           <tbody>
             {data.map((r) => (
               <tr key={r.date}>
-                <td>{r.date}</td>
+                <td>{String(r.date).slice(0, 4)}</td>
                 <td style={{ textAlign: "right" }}>{r.tmin ?? ""}</td>
                 <td style={{ textAlign: "right" }}>{r.tavg ?? ""}</td>
                 <td style={{ textAlign: "right" }}>{r.tmax ?? ""}</td>
