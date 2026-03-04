@@ -8,6 +8,7 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import type { Visibility } from "./DataToggles";
 
 type YearlyPoint = {
@@ -32,6 +33,14 @@ type Props = {
   visibility: Visibility;
   loading?: boolean;
 };
+
+function formatTemperatureValue(value: ValueType | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "";
+  return `${new Intl.NumberFormat("de-DE", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(value)} °C`;
+}
 
 function seasonKey(label: string): "spring" | "summer" | "autumn" | "winter" | null {
   const s = label.toLowerCase();
@@ -106,7 +115,10 @@ export function ChartsPanel({ stationName, yearly, seasons, visibility, loading 
               <YAxis />
               <Tooltip
                 labelFormatter={(label) => `Jahr: ${String(label)}`}
-                formatter={(value: any, name: any) => [value == null ? "" : `${value} °C`, name]}
+                formatter={(value: ValueType | undefined, name: NameType | undefined) => [
+                  formatTemperatureValue(value),
+                  name ?? "",
+                ]}
               />
               <Legend />
 
