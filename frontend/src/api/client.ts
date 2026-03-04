@@ -42,14 +42,4 @@ export function fetchTemperatures(q: TemperatureQuery) {
   });
 
   return getJson<TemperaturePoint[]>(`/api/temperatures?${query}`);
-  async function getJson<T>(url: string): Promise<T> {
-  const t0 = performance.now();
-  const res = await fetch(url);
-  const ms = Math.round(performance.now() - t0);
-
-  console.log(`[API] ${res.status} ${url} (${ms} ms)`);
-
-  if (!res.ok) throw new Error(`${url} fehlgeschlagen: ${res.status}`);
-  return res.json();
-}
 }
