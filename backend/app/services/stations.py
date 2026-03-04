@@ -28,10 +28,10 @@ async def search_stations_db(
     }
 
     if from_date is not None:
-        where_parts.append("data_end >= :from_date")
+        where_parts.append("data_start <= :from_date")
         params["from_date"] = dt_date.fromisoformat(from_date)
     if to_date is not None:
-        where_parts.append("data_start <= :to_date")
+        where_parts.append("data_end >= :to_date")
         params["to_date"] = dt_date.fromisoformat(to_date)
 
     where_sql = " AND ".join(where_parts)

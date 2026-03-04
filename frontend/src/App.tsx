@@ -2,9 +2,12 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import { Toolbar } from "./components/Toolbar";
 import { ChartsPanel } from "./components/ChartsPanel";
 import { TemperatureTable } from "./components/TemperatureTable";
+import { SeasonTable } from "./components/SeasonTable";
 import { searchStations, fetchTemperatures } from "./api/client";
 import type { Station, TemperaturePoint } from "./api/types";
 import "./App.css";
+import { DataToggles } from "./components/DataToggles";
+import type { Visibility } from "./components/DataToggles";
 
 import {
   pushConfigSnapshot,
@@ -19,6 +22,15 @@ const MIN_YEAR = 1800;
 
 const DEFAULT_FROM_YEAR = 2024;
 const DEFAULT_TO_YEAR = 2025;
+
+type YearlyPoint = {
+  date: string;
+  tmin: number | null;
+  tavg: number | null;
+  tmax: number | null;
+};
+
+type Hemisphere = "north" | "south";
 
 type SearchOverrides = Partial<{
   lat: number;
@@ -57,85 +69,230 @@ function normalizeSearchParams(radiusKm: number, limit: number, fromYear: number
   return { clampedRadiusKm, clampedLimit };
 }
 
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
 function round1(n: number) {
   return Math.round(n * 10) / 10;
 }
 
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function monthKey(year: number, month: number) {
+  return `${year}-${pad2(month)}`;
+}
+
 function daysInMonthUTC(year: number, month1to12: number) {
-  const d = new Date(Date.UTC(year, month1to12, 0));
-  return d.getUTCDate();
+  return new Date(Date.UTC(year, month1to12, 0)).getUTCDate();
 }
 
-function extractYearAndWeight(dateStr: string) {
+function parseYearMonth(dateStr: string): { year: number; month: number } | null {
   const s = String(dateStr);
-  const year = s.slice(0, 4);
-
-  const monthPart = s.length >= 7 ? s.slice(5, 7) : "";
-  const month = Number(monthPart);
-
-  if (Number.isFinite(month) && month >= 1 && month <= 12) {
-    const y = Number(year);
-    if (Number.isFinite(y)) {
-      return { year, weight: daysInMonthUTC(y, month) };
-    }
-  }
-
-  return { year, weight: 1 };
+  if (s.length < 7) return null;
+  const y = Number(s.slice(0, 4));
+  const m = Number(s.slice(5, 7));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return null;
+  return { year: y, month: m };
 }
 
-function aggregateMonthlyToYear(points: TemperaturePoint[]): TemperaturePoint[] {
-  type Acc = {
-    sumTmin: number;
-    wTmin: number;
-    sumTavg: number;
-    wTavg: number;
-    sumTmax: number;
-    wTmax: number;
-  };
+type MonthlyRec = {
+  year: number;
+  month: number;
+  key: string;
+  days: number;
+  tmin: number;
+  tavg: number | null;
+  tmax: number;
+};
 
-  const acc = new Map<string, Acc>();
+function buildMonthlyIndex(points: TemperaturePoint[]) {
+  const idx = new Map<string, MonthlyRec>();
 
   for (const p of points) {
-    const { year, weight } = extractYearAndWeight(p.date);
+    const ym = parseYearMonth(p.date);
+    if (!ym) continue;
 
-    const a =
-      acc.get(year) ?? { sumTmin: 0, wTmin: 0, sumTavg: 0, wTavg: 0, sumTmax: 0, wTmax: 0 };
+    const tmin = isFiniteNumber(p.tmin) ? p.tmin : null;
+    const tmax = isFiniteNumber(p.tmax) ? p.tmax : null;
+    const tavg = isFiniteNumber(p.tavg) ? p.tavg : null;
 
-    if (p.tmin !== undefined && p.tmin !== null && Number.isFinite(p.tmin)) {
-      a.sumTmin += p.tmin * weight;
-      a.wTmin += weight;
-    }
+    if (tmin === null || tmax === null) continue;
 
-    if (p.tavg !== undefined && p.tavg !== null && Number.isFinite(p.tavg)) {
-      a.sumTavg += p.tavg * weight;
-      a.wTavg += weight;
-    }
-
-    if (p.tmax !== undefined && p.tmax !== null && Number.isFinite(p.tmax)) {
-      a.sumTmax += p.tmax * weight;
-      a.wTmax += weight;
-    }
-
-    acc.set(year, a);
+    const key = monthKey(ym.year, ym.month);
+    idx.set(key, {
+      year: ym.year,
+      month: ym.month,
+      key,
+      days: daysInMonthUTC(ym.year, ym.month),
+      tmin,
+      tavg,
+      tmax,
+    });
   }
 
-  return [...acc.entries()]
-    .sort((a, b) => Number(a[0]) - Number(b[0]))
-    .map(([year, a]) => ({
-      date: year,
-      tmin: a.wTmin ? round1(a.sumTmin / a.wTmin) : undefined,
-      tavg: a.wTavg ? round1(a.sumTavg / a.wTavg) : undefined,
-      tmax: a.wTmax ? round1(a.sumTmax / a.wTmax) : undefined,
-    }));
+  return idx;
 }
 
-function isYearString(s: string) {
-  return /^[0-9]{4}$/.test(s);
+function fillMissingYears(map: Map<string, YearlyPoint>, fromYear: number, toYear: number): YearlyPoint[] {
+  const out: YearlyPoint[] = [];
+  for (let y = fromYear; y <= toYear; y++) {
+    const k = String(y);
+    out.push(map.get(k) ?? { date: k, tmin: null, tavg: null, tmax: null });
+  }
+  return out;
 }
 
-function areYearlyPoints(points: TemperaturePoint[]) {
-  return points.every((p) => isYearString(String(p.date)));
+function aggregateMonthlyToYearStrict(monthIdx: Map<string, MonthlyRec>, fromYear: number, toYear: number): YearlyPoint[] {
+  const outMap = new Map<string, YearlyPoint>();
+
+  for (let y = fromYear; y <= toYear; y++) {
+    let sumDays = 0;
+
+    let sumTmin = 0;
+    let sumTmax = 0;
+
+    let sumTavg = 0;
+    let okAvg = true;
+
+    let ok = true;
+
+    for (let m = 1; m <= 12; m++) {
+      const rec = monthIdx.get(monthKey(y, m));
+      if (!rec) {
+        ok = false;
+        break;
+      }
+
+      sumDays += rec.days;
+      sumTmin += rec.tmin * rec.days;
+      sumTmax += rec.tmax * rec.days;
+
+      if (rec.tavg === null) {
+        okAvg = false;
+      } else {
+        sumTavg += rec.tavg * rec.days;
+      }
+    }
+
+    if (!ok || sumDays === 0) {
+      outMap.set(String(y), { date: String(y), tmin: null, tavg: null, tmax: null });
+      continue;
+    }
+
+    outMap.set(String(y), {
+      date: String(y),
+      tmin: round1(sumTmin / sumDays),
+      tavg: okAvg ? round1(sumTavg / sumDays) : null,
+      tmax: round1(sumTmax / sumDays),
+    });
+  }
+
+  return fillMissingYears(outMap, fromYear, toYear);
 }
+
+function aggregateMonthsStrict(monthIdx: Map<string, MonthlyRec>, months: Array<{ y: number; m: number }>) {
+  let sumDays = 0;
+
+  let sumTmin = 0;
+  let sumTmax = 0;
+
+  let sumTavg = 0;
+  let okAvg = true;
+
+  for (const mm of months) {
+    const rec = monthIdx.get(monthKey(mm.y, mm.m));
+    if (!rec) return { tmin: null, tavg: null, tmax: null };
+
+    sumDays += rec.days;
+    sumTmin += rec.tmin * rec.days;
+    sumTmax += rec.tmax * rec.days;
+
+    if (rec.tavg === null) {
+      okAvg = false;
+    } else {
+      sumTavg += rec.tavg * rec.days;
+    }
+  }
+
+  if (sumDays === 0) return { tmin: null, tavg: null, tmax: null };
+
+  return {
+    tmin: round1(sumTmin / sumDays),
+    tavg: okAvg ? round1(sumTavg / sumDays) : null,
+    tmax: round1(sumTmax / sumDays),
+  };
+}
+
+function computeSeasonsForRange(
+  monthIdx: Map<string, MonthlyRec>,
+  fromYear: number,
+  toYear: number,
+  hemisphere: Hemisphere
+) {
+  const rows: Array<{
+    year: string;
+    season: string;
+    tmin: number | null;
+    tavg: number | null;
+    tmax: number | null;
+  }> = [];
+
+  const seasonByLabelNorth: Record<string, "DJF" | "MAM" | "JJA" | "SON"> = {
+    Winter: "DJF",
+    Frühling: "MAM",
+    Sommer: "JJA",
+    Herbst: "SON",
+  };
+
+  const seasonByLabelSouth: Record<string, "DJF" | "MAM" | "JJA" | "SON"> = {
+    Winter: "JJA",
+    Frühling: "SON",
+    Sommer: "DJF",
+    Herbst: "MAM",
+  };
+
+  const labels = ["Winter", "Frühling", "Sommer", "Herbst"];
+  const mapping = hemisphere === "south" ? seasonByLabelSouth : seasonByLabelNorth;
+
+  for (let y = fromYear; y <= toYear; y++) {
+    for (const label of labels) {
+      const code = mapping[label];
+
+      const months =
+        code === "DJF"
+          ? [{ y: y - 1, m: 12 }, { y, m: 1 }, { y, m: 2 }]
+          : code === "MAM"
+          ? [{ y, m: 3 }, { y, m: 4 }, { y, m: 5 }]
+          : code === "JJA"
+          ? [{ y, m: 6 }, { y, m: 7 }, { y, m: 8 }]
+          : [{ y, m: 9 }, { y, m: 10 }, { y, m: 11 }];
+
+      const agg = aggregateMonthsStrict(monthIdx, months);
+
+      rows.push({
+        year: String(y),
+        season: label,
+        tmin: agg.tmin,
+        tavg: agg.tavg,
+        tmax: agg.tmax,
+      });
+    }
+  }
+
+  return rows;
+}
+
+
+const DEFAULT_VISIBILITY: Visibility = {
+  year: { tmin: true, tavg: true, tmax: true },
+  spring: { tmin: false, tmax: false },
+  summer: { tmin: false, tmax: false },
+  autumn: { tmin: false, tmax: false },
+  winter: { tmin: false, tmax: false },
+};
 
 export default function App() {
   const restoringRef = useRef(false);
@@ -148,10 +305,7 @@ export default function App() {
   const [fromYear, setFromYear] = useState<number>(DEFAULT_FROM_YEAR);
   const [toYear, setToYear] = useState<number>(DEFAULT_TO_YEAR);
 
-  const { fy, ty, from, to } = useMemo(
-    () => yearRangeToDates(fromYear, toYear),
-    [fromYear, toYear]
-  );
+  const { fy, ty, from, to } = useMemo(() => yearRangeToDates(fromYear, toYear), [fromYear, toYear]);
 
   const [view, setView] = useState<"chart" | "table">("chart");
 
@@ -164,11 +318,17 @@ export default function App() {
     [stations, activeStationId]
   );
 
-  const [temps, setTemps] = useState<TemperaturePoint[]>([]);
+  
+  const [yearlyTemps, setYearlyTemps] = useState<YearlyPoint[]>([]);
+  const [seasonRows, setSeasonRows] = useState<Array<{ year: string; season: string; tmin: number | null; tavg: number | null; tmax: number | null }>>([]);
+  const [hemisphere, setHemisphere] = useState<Hemisphere>("north");
+
   const [loadingStations, setLoadingStations] = useState(false);
   const [loadingTemps, setLoadingTemps] = useState(false);
   const [warmingUp, setWarmingUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
 
   const [hasPreviousConfig, setHasPreviousConfig] = useState<boolean>(() => storageHasPreviousConfig());
 
@@ -196,23 +356,27 @@ export default function App() {
     setStations([]);
     setSelectedStationId(null);
     setActiveStationId(null);
-    setTemps([]);
+    setYearlyTemps([]);
+    setSeasonRows([]);
   }, [fy, ty]);
 
   const resetAll = () => {
     setError(null);
     setStations([]);
     setSelectedStationId(null);
-    setTemps([]);
-    setView("chart");
     setActiveStationId(null);
+    setYearlyTemps([]);
+    setSeasonRows([]);
+    setView("chart");
     setWarmingUp(false);
     setFromYear(DEFAULT_FROM_YEAR);
     setToYear(DEFAULT_TO_YEAR);
+    setVisibility(DEFAULT_VISIBILITY);
   };
 
   const warmupStation = async (stationId: string, warmFrom: string, warmTo: string) => {
     if (!stationId) return;
+
     setWarmingUp(true);
     try {
       await fetch(`/api/temperatures?station_id=${encodeURIComponent(stationId)}&from=${warmFrom}&to=${warmTo}`);
@@ -248,7 +412,8 @@ export default function App() {
       setStations(res);
       setSelectedStationId(null);
       setActiveStationId(null);
-      setTemps([]);
+      setYearlyTemps([]);
+      setSeasonRows([]);
 
       if (res.length === 0) {
         setError("Keine Stationen mit Daten im gewählten Zeitraum gefunden. Zeitraum oder Radius anpassen.");
@@ -272,32 +437,37 @@ export default function App() {
     try {
       setError(null);
       setLoadingTemps(true);
-      setTemps([]);
+      setYearlyTemps([]);
+      setSeasonRows([]);
 
       const fromYearEff = override?.fromYear ?? fy;
       const toYearEff = override?.toYear ?? ty;
-
-      if (fromYearEff > toYearEff) {
-        throw new Error("Startjahr darf nicht nach Endjahr liegen.");
-      }
+      if (fromYearEff > toYearEff) throw new Error("Startjahr darf nicht nach Endjahr liegen.");
 
       const { from: fromEff, to: toEff } = yearRangeToDates(fromYearEff, toYearEff);
 
-      const monthly = await fetchTemperatures({
-        stationId,
-        from: fromEff,
-        to: toEff,
-      });
+      const padFromYear = Math.max(MIN_YEAR, fromYearEff - 1);
+      const paddedFrom = `${padFromYear}-12-01`;
 
-      const yearly = aggregateMonthlyToYear(monthly);
-
-      if (yearly.length === 0) {
+      const monthly = await fetchTemperatures({ stationId, from: paddedFrom, to: toEff });
+      if (!monthly.length) {
         setError("Für diese Station sind im gewählten Zeitraum keine Daten verfügbar.");
         setActiveStationId(null);
         return;
       }
 
-      setTemps(yearly);
+      const stationLat = stations.find((s) => s.id === stationId)?.lat ?? 48.0;
+      const hemi: Hemisphere = stationLat < 0 ? "south" : "north";
+      setHemisphere(hemi);
+
+      const idx = buildMonthlyIndex(monthly);
+      const yearly = aggregateMonthlyToYearStrict(idx, fromYearEff, toYearEff);
+      const seasons = computeSeasonsForRange(idx, fromYearEff, toYearEff, hemi);
+
+      
+      setYearlyTemps(yearly);
+      setSeasonRows(seasons);
+
       setSelectedStationId(stationId);
       setActiveStationId(stationId);
 
@@ -314,7 +484,7 @@ export default function App() {
         stations,
         selectedStationId: stationId,
         activeStationId: stationId,
-        temps: yearly,
+        temps: monthly,
       };
 
       const hist = pushConfigSnapshot(snapshot);
@@ -328,7 +498,6 @@ export default function App() {
 
   const onLoadPreviousConfig = () => {
     const prev = getPreviousConfigSnapshot();
-
     if (!prev) {
       setError("Keine vorherige Konfiguration gespeichert. Führe mindestens zwei Suchen aus.");
       return;
@@ -353,10 +522,19 @@ export default function App() {
     setActiveStationId(prev.activeStationId ?? null);
 
     const prevTemps = prev.temps ?? [];
-    const restored = areYearlyPoints(prevTemps) ? prevTemps : aggregateMonthlyToYear(prevTemps);
-    setTemps(restored);
+    
 
-    setWarmingUp(false);
+    const stationLat = (prev.stations ?? []).find((s) => s.id === prev.selectedStationId)?.lat ?? 48.0;
+    const hemi: Hemisphere = stationLat < 0 ? "south" : "north";
+    setHemisphere(hemi);
+
+    const idx = buildMonthlyIndex(prevTemps);
+    const yearly = aggregateMonthlyToYearStrict(idx, prevFromYear, prevToYear);
+    const seasons = computeSeasonsForRange(idx, prevFromYear, prevToYear, hemi);
+
+    setYearlyTemps(yearly);
+    setSeasonRows(seasons);
+
     setError(null);
 
     setTimeout(() => {
@@ -404,9 +582,43 @@ export default function App() {
       {error && <div className="errorBanner">{error}</div>}
 
       <main className="content">
-        {view === "chart" && <ChartsPanel stationName={activeStation?.name} data={temps} loading={loadingTemps} />}
-        {view === "table" && <TemperatureTable data={temps} />}
-      </main>
+        {view === "chart" && (
+          <>
+            <div style={{ marginBottom: 12 }}>
+              <DataToggles
+                value={visibility}
+                onChange={setVisibility}
+                disabledYear={!yearlyTemps.length}
+                disabledSeasons={!seasonRows.length}
+              />
+            </div>
+
+            <ChartsPanel
+              stationName={activeStation?.name}
+              yearly={yearlyTemps}
+              seasons={seasonRows}
+              visibility={visibility}
+              loading={loadingTemps}
+            />
+          </>
+        )}
+
+  {view === "table" && (
+    <>
+      <div style={{ marginBottom: 12 }}>
+        <DataToggles
+          value={visibility}
+          onChange={setVisibility}
+          disabledYear={!yearlyTemps.length}
+          disabledSeasons={!seasonRows.length}
+        />
+      </div>
+
+      <TemperatureTable data={yearlyTemps} visibility={visibility.year} />
+      <SeasonTable rows={seasonRows} hemisphere={hemisphere} visibility={visibility} />
+    </>
+  )}
+</main>
     </div>
   );
 }

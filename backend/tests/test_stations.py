@@ -91,6 +91,10 @@ class TestSearchStationsDB:
         assert params["from_date"] == date(2020, 1, 1)
         assert params["to_date"] == date(2024, 12, 31)
 
+        query_text = str(call_args[0][0])
+        assert "data_start <= :from_date" in query_text
+        assert "data_end >= :to_date" in query_text
+
     @pytest.mark.asyncio
     async def test_with_only_from_date(self):
         result = _fake_result()
@@ -104,6 +108,9 @@ class TestSearchStationsDB:
         params = session.execute.call_args[0][1]
         assert params["from_date"] == date(2020, 1, 1)
         assert "to_date" not in params
+
+        query_text = str(session.execute.call_args[0][0])
+        assert "data_start <= :from_date" in query_text
 
     @pytest.mark.asyncio
     async def test_empty_result(self):
@@ -122,6 +129,23 @@ class TestSearchStationsDB:
 
         params = session.execute.call_args[0][1]
         assert params["lim"] == 7
+
+    @pytest.mark.asyncio
+    async def test_with_only_to_date(self):
+        result = _fake_result()
+        session = _session(result)
+
+        await search_stations_db(
+            session, 48.0, 11.0, 50, 10,
+            to_date="2025-12-31",
+        )
+
+        params = session.execute.call_args[0][1]
+        assert params["to_date"] == date(2025, 12, 31)
+        assert "from_date" not in params
+
+        query_text = str(session.execute.call_args[0][0])
+        assert "data_end >= :to_date" in query_text
 
     @pytest.mark.asyncio
     async def test_output_schema(self):
