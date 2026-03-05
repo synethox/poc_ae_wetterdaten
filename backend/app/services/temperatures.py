@@ -93,7 +93,7 @@ async def get_temperatures(
               AND date >= :from_date
               AND date <= :to_date
             GROUP BY date_trunc('month', date)
-            HAVING COUNT(tmin) > 0 AND COUNT(tmax) > 0
+            HAVING COUNT(tmin) > 0 OR COUNT(tmax) > 0 OR COUNT(tavg) > 0
             ORDER BY month
             """
         ),
@@ -108,9 +108,9 @@ async def get_temperatures(
         {
             "date": row.month,
             "level": "month",
-            "tmin": float(row.tmin) if row.tmin is not None else 0.0,
-            "tavg": float(row.tavg) if row.tavg is not None else 0.0,
-            "tmax": float(row.tmax) if row.tmax is not None else 0.0,
+            "tmin": float(row.tmin) if row.tmin is not None else None,
+            "tavg": float(row.tavg) if row.tavg is not None else None,
+            "tmax": float(row.tmax) if row.tmax is not None else None,
         }
         for row in result
     ]

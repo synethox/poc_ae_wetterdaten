@@ -22,6 +22,8 @@ const MIN_YEAR = 1800;
 
 const DEFAULT_FROM_YEAR = 2024;
 const DEFAULT_TO_YEAR = 2025;
+const MIN_SEASON_MONTHS = 1;
+const MIN_YEAR_MONTHS = 1;
 
 type YearlyPoint = {
   date: string;
@@ -103,9 +105,9 @@ type MonthlyRec = {
   month: number;
   key: string;
   days: number;
-  tmin: number;
+  tmin: number | null;
   tavg: number | null;
-  tmax: number;
+  tmax: number | null;
 };
 
 function buildMonthlyIndex(points: TemperaturePoint[]) {
@@ -119,7 +121,7 @@ function buildMonthlyIndex(points: TemperaturePoint[]) {
     const tmax = isFiniteNumber(p.tmax) ? p.tmax : null;
     const tavg = isFiniteNumber(p.tavg) ? p.tavg : null;
 
-    if (tmin === null || tmax === null) continue;
+    if (tmin === null && tmax === null && tavg === null) continue;
 
     const key = monthKey(ym.year, ym.month);
     idx.set(key, {
@@ -149,80 +151,88 @@ function aggregateMonthlyToYearStrict(monthIdx: Map<string, MonthlyRec>, fromYea
   const outMap = new Map<string, YearlyPoint>();
 
   for (let y = fromYear; y <= toYear; y++) {
-    let sumDays = 0;
-
+    let tminMonths = 0;
+    let tmaxMonths = 0;
+    let tavgMonths = 0;
+    let tminDays = 0;
+    let tmaxDays = 0;
+    let tavgDays = 0;
     let sumTmin = 0;
     let sumTmax = 0;
-
     let sumTavg = 0;
-    let okAvg = true;
-
-    let ok = true;
 
     for (let m = 1; m <= 12; m++) {
       const rec = monthIdx.get(monthKey(y, m));
-      if (!rec) {
-        ok = false;
-        break;
+      if (!rec) continue;
+
+      if (rec.tmin !== null) {
+        tminMonths += 1;
+        tminDays += rec.days;
+        sumTmin += rec.tmin * rec.days;
       }
-
-      sumDays += rec.days;
-      sumTmin += rec.tmin * rec.days;
-      sumTmax += rec.tmax * rec.days;
-
-      if (rec.tavg === null) {
-        okAvg = false;
-      } else {
+      if (rec.tmax !== null) {
+        tmaxMonths += 1;
+        tmaxDays += rec.days;
+        sumTmax += rec.tmax * rec.days;
+      }
+      if (rec.tavg !== null) {
+        tavgMonths += 1;
+        tavgDays += rec.days;
         sumTavg += rec.tavg * rec.days;
       }
     }
 
-    if (!ok || sumDays === 0) {
-      outMap.set(String(y), { date: String(y), tmin: null, tavg: null, tmax: null });
-      continue;
-    }
-
     outMap.set(String(y), {
       date: String(y),
-      tmin: round1(sumTmin / sumDays),
-      tavg: okAvg ? round1(sumTavg / sumDays) : null,
-      tmax: round1(sumTmax / sumDays),
+      tmin: tminMonths >= MIN_YEAR_MONTHS && tminDays > 0 ? round1(sumTmin / tminDays) : null,
+      tavg: tavgMonths >= MIN_YEAR_MONTHS && tavgDays > 0 ? round1(sumTavg / tavgDays) : null,
+      tmax: tmaxMonths >= MIN_YEAR_MONTHS && tmaxDays > 0 ? round1(sumTmax / tmaxDays) : null,
     });
   }
 
   return fillMissingYears(outMap, fromYear, toYear);
 }
 
-function aggregateMonthsStrict(monthIdx: Map<string, MonthlyRec>, months: Array<{ y: number; m: number }>) {
-  let sumDays = 0;
-
+function aggregateMonthsForSeason(
+  monthIdx: Map<string, MonthlyRec>,
+  months: Array<{ y: number; m: number }>,
+  minPresentMonths = 1
+) {
+  let tminMonths = 0;
+  let tmaxMonths = 0;
+  let tavgMonths = 0;
+  let tminDays = 0;
+  let tmaxDays = 0;
+  let tavgDays = 0;
   let sumTmin = 0;
   let sumTmax = 0;
-
   let sumTavg = 0;
-  let okAvg = true;
 
   for (const mm of months) {
     const rec = monthIdx.get(monthKey(mm.y, mm.m));
-    if (!rec) return { tmin: null, tavg: null, tmax: null };
+    if (!rec) continue;
 
-    sumDays += rec.days;
-    sumTmin += rec.tmin * rec.days;
-    sumTmax += rec.tmax * rec.days;
-
-    if (rec.tavg === null) {
-      okAvg = false;
-    } else {
+    if (rec.tmin !== null) {
+      tminMonths += 1;
+      tminDays += rec.days;
+      sumTmin += rec.tmin * rec.days;
+    }
+    if (rec.tmax !== null) {
+      tmaxMonths += 1;
+      tmaxDays += rec.days;
+      sumTmax += rec.tmax * rec.days;
+    }
+    if (rec.tavg !== null) {
+      tavgMonths += 1;
+      tavgDays += rec.days;
       sumTavg += rec.tavg * rec.days;
     }
   }
 
-  if (sumDays === 0) return { tmin: null, tavg: null, tmax: null };
-
   return {
-    tmin: round1(sumTmin / sumDays),
-    tavg: okAvg ? round1(sumTavg / sumDays) : null,
-    tmax: round1(sumTmax / sumDays),
+    tmin: tminMonths >= minPresentMonths && tminDays > 0 ? round1(sumTmin / tminDays) : null,
+    tavg: tavgMonths >= minPresentMonths && tavgDays > 0 ? round1(sumTavg / tavgDays) : null,
+    tmax: tmaxMonths >= minPresentMonths && tmaxDays > 0 ? round1(sumTmax / tmaxDays) : null,
   };
 }
 
@@ -270,7 +280,7 @@ function computeSeasonsForRange(
           ? [{ y, m: 6 }, { y, m: 7 }, { y, m: 8 }]
           : [{ y, m: 9 }, { y, m: 10 }, { y, m: 11 }];
 
-      const agg = aggregateMonthsStrict(monthIdx, months);
+      const agg = aggregateMonthsForSeason(monthIdx, months, MIN_SEASON_MONTHS);
 
       rows.push({
         year: String(y),

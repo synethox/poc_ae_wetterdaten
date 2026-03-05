@@ -8,9 +8,9 @@ export type Station = {
 
 export type TemperaturePoint = {
   date: string; 
-  tmin?: number;
-  tavg?: number;
-  tmax?: number;
+  tmin?: number | null;
+  tavg?: number | null;
+  tmax?: number | null;
 };
 
 

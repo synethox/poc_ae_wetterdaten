@@ -179,7 +179,7 @@ class TestGetTemperatures:
 
     @pytest.mark.asyncio
     async def test_handles_none_values_in_results(self):
-        """tmin/tavg/tmax can be None from the DB – should default to 0.0."""
+        """tmin/tavg/tmax can be None from the DB – should stay None."""
         monthly_rows = _fake_month_rows(
             {"month": "2023-06", "tmin": None, "tavg": None, "tmax": None},
         )
@@ -192,9 +192,9 @@ class TestGetTemperatures:
 
         result = await get_temperatures(session, "GM1", "2023-01-01", "2023-12-31")
 
-        assert result[0]["tmin"] == 0.0
-        assert result[0]["tavg"] == 0.0
-        assert result[0]["tmax"] == 0.0
+        assert result[0]["tmin"] is None
+        assert result[0]["tavg"] is None
+        assert result[0]["tmax"] is None
 
     @pytest.mark.asyncio
     async def test_output_schema_keys(self):
