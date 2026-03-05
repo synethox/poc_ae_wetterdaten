@@ -73,7 +73,7 @@ Details: siehe [Architecture Communication Canvas](docs/architecture-communicati
 ```bash
 # Repository klonen
 git clone <repository-url>
-cd Wetter_funk
+cd <lokaler Speicherort>
 
 # Alle Services starten (Datenbank, Redis, Backend + Frontend)
 docker compose up --build
